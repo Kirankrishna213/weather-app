@@ -1,41 +1,68 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Kiran - Weather App</title>
+    <title>Kiran - Global Weather</title>
     <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-<body style="background-image: url('{{ bg_image }}')">
-    <div class="container">
-        <h1>Kiran - Weather App</h1>
-        
-        <form method="POST">
-            <input type="text" name="city" placeholder="Enter city name" required>
-            <button type="submit">Get Weather</button>
-        </form>
+<body style="background: {{ bg_style }}; background-attachment: fixed;">
+    <div class="main-container">
+        <div class="search-container">
+            <form method="POST">
+                <input type="text" name="city" placeholder="Search any city..." required>
+                <button type="submit"><i class="fas fa-search"></i> Search</button>
+            </form>
+        </div>
 
-        {% if error %}
-            <div class="error">{{ error }}</div>
-        {% endif %}
-
-        {% if weather %}
-        <div class="weather-card">
-            <h2>{{ weather.city }}</h2>
-            <img src="http://openweathermap.org/img/wn/{{ weather.icon }}@2x.png" alt="Weather icon">
-            <div class="temp">{{ weather.temp }}°C</div>
-            <p>Feels like {{ weather.feels_like }}°C</p>
-            <p>{{ weather.description }}</p>
-            <p>Humidity: {{ weather.humidity }}%</p>
-            <p>Wind: {{ weather.wind }} m/s</p>
+        {% if searched_weather %}
+        <div class="featured-weather">
+            <div class="featured-card {{ searched_weather.main_weather.lower() }}">
+                <h2>{{ searched_weather.city }}, {{ searched_weather.country }}</h2>
+                <div class="featured-content">
+                    <div class="featured-main">
+                        <div class="big-temp">{{ searched_weather.temp }}°C</div>
+                        <img src="http://openweathermap.org/img/wn/{{ searched_weather.icon }}@4x.png">
+                    </div>
+                    <div class="featured-details">
+                        <p class="description">{{ searched_weather.description }}</p>
+                        <p>Feels like {{ searched_weather.feels_like }}°C</p>
+                        <p><i class="fas fa-tint"></i> {{ searched_weather.humidity }}%</p>
+                        <p><i class="fas fa-wind"></i> {{ searched_weather.wind }} m/s</p>
+                    </div>
+                </div>
+            </div>
         </div>
         {% endif %}
 
+        <h1 class="cities-title">Global Weather Overview</h1>
+        
+        <div class="weather-grid">
+            {% for weather in all_weather %}
+            <div class="weather-card {{ weather.main_weather.lower() }}">
+                <div class="city-header">
+                    <h3>{{ weather.city }}, {{ weather.country }}</h3>
+                    <img src="http://openweathermap.org/img/wn/{{ weather.icon }}@2x.png">
+                </div>
+                <div class="temp">{{ weather.temp }}°C</div>
+                <div class="details">
+                    <p>{{ weather.description }}</p>
+                    <p>Feels like {{ weather.feels_like }}°C</p>
+                    <p><i class="fas fa-tint"></i> {{ weather.humidity }}%</p>
+                    <p><i class="fas fa-wind"></i> {{ weather.wind }} m/s</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
         <div class="footer">
-            <p>Have a good day!</p>
+            <p>Have a wonderful day! <i class="fas fa-sun"></i></p>
             <div class="contact-info">
-                <p>For help contact:</p>
-                <p>Kiran Krishna</p>
-                <p>kkirankrishnar@gmail.com</p>
-                <p>8892244492</p>
+                <p>For help contact: Kiran Krishna</p>
+                <p>
+                    <a href="mailto:kkirankrishnar@gmail.com"><i class="fas fa-envelope"></i> kkirankrishnar@gmail.com</a> | 
+                    <a href="tel:+918892244492"><i class="fas fa-phone"></i> 8892244492</a>
+                </p>
             </div>
         </div>
     </div>
