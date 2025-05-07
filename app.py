@@ -1,10 +1,11 @@
 from flask import Flask, render_template, request
 import requests
 import random
+from waitress import serve  # Production-ready server
 
 app = Flask(__name__)
 
-# Your OpenWeatherMap API Key
+# Configuration
 API_KEY = "0089a5613761094cad0055cbe2c01cb0"
 BACKGROUND_IMAGES = [
     "https://source.unsplash.com/random/1600x900/?weather,sun",
@@ -49,4 +50,4 @@ def index():
                         bg_image=bg_image)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    serve(app, host="0.0.0.0", port=10000)  # Production server configuration
