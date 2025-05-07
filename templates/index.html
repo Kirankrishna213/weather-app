@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kiran - Weather App</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body style="background-image: url('{{ bg_image }}')">
+    <div class="container">
+        <h1>Kiran - Weather App</h1>
+        
+        <form method="POST">
+            <input type="text" name="city" placeholder="Enter city name" required>
+            <button type="submit">Get Weather</button>
+        </form>
+
+        {% if error %}
+            <div class="error">{{ error }}</div>
+        {% endif %}
+
+        {% if weather %}
+        <div class="weather-card">
+            <h2>{{ weather.city }}</h2>
+            <img src="http://openweathermap.org/img/wn/{{ weather.icon }}@2x.png" alt="Weather icon">
+            <div class="temp">{{ weather.temp }}°C</div>
+            <p>Feels like {{ weather.feels_like }}°C</p>
+            <p>{{ weather.description }}</p>
+            <p>Humidity: {{ weather.humidity }}%</p>
+            <p>Wind: {{ weather.wind }} m/s</p>
+        </div>
+        {% endif %}
+
+        <div class="footer">
+            <p>Have a good day!</p>
+            <div class="contact-info">
+                <p>For help contact:</p>
+                <p>Kiran Krishna</p>
+                <p>kkirankrishnar@gmail.com</p>
+                <p>8892244492</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
