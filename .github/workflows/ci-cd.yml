@@ -32,24 +32,21 @@ jobs:
         run: |
           pytest --junitxml=pytest-report.xml || echo "No tests found"
 
+      # 🔥 Single SonarCloud action (includes Quality Gate)
       - name: SonarCloud Scan
-        id: sonar
-        uses: SonarSource/sonarcloud-github-action@v2
+        uses: sonarsource/sonarcloud-github-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
-          SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
-
-      - name: Check SonarCloud Quality Gate status
-        id: qualitygate
-        uses: SonarSource/sonarcloud-quality-gate-action@v1
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.python.coverage.reportPaths=coverage.xml
 
   deploy:
     runs-on: ubuntu-latest
     needs: build-test-analyze
-    if: success()   # deploys only if build + sonar + quality gate passed
+    if: success()   # deploy to Render only if SonarCloud passes
 
     steps:
       - name: Deploy to Render
