@@ -34,13 +34,13 @@ jobs:
       - name: OWASP Python Dependency Scan
         run: safety check --full-report
 
-      # 5. Run Python tests
+      # 5. Run pytest
       - name: Run pytest
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
           pytest -vv --maxfail=1 --tb=long
 
-      # 6. Set up Java (for Maven/Gradle)
+      # 6. Set up Java
       - name: Set up Java
         uses: actions/setup-java@v3
         with:
@@ -49,13 +49,21 @@ jobs:
 
       # 7. Maven OWASP Dependency Check
       - name: OWASP Dependency Check - Maven
-        if: exists('pom.xml')
-        run: mvn org.owasp:dependency-check-maven:check
+        run: |
+          if [ -f pom.xml ]; then
+            mvn org.owasp:dependency-check-maven:check
+          else
+            echo "No pom.xml, skipping Maven dependency check"
+          fi
 
       # 8. Gradle OWASP Dependency Check
       - name: OWASP Dependency Check - Gradle
-        if: exists('build.gradle') || exists('build.gradle.kts')
-        run: ./gradlew dependencyCheckAnalyze
+        run: |
+          if [ -f build.gradle ] || [ -f build.gradle.kts ]; then
+            ./gradlew dependencyCheckAnalyze
+          else
+            echo "No Gradle build file, skipping Gradle dependency check"
+          fi
 
       # 9. SonarQube Analysis
       - name: SonarQube Scan
@@ -64,5 +72,3 @@ jobs:
           projectKey: your-project-key
           organization: your-org
           token: ${{ secrets.SONAR_TOKEN }}
-          # Optional: adjust branch if needed
-          # branchName: ${{ github.ref_name }}
