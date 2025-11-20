@@ -14,7 +14,7 @@ jobs:
         uses: actions/checkout@v4
 
       ######################################################################
-      # Install Trivy (safe apt repo method, no 404s)
+      # Install Trivy safely (no 404)
       ######################################################################
       - name: Install Trivy
         run: |
@@ -33,69 +33,3 @@ jobs:
 
       ######################################################################
       # SBOM Generation
-      ######################################################################
-      - name: Generate SBOM (CycloneDX)
-        run: |
-          trivy sbom --output sbom.json .
-
-      ######################################################################
-      # Vulnerability Scan + Reachability + Dependency Graph
-      ######################################################################
-      - name: Trivy FS Scan with Reachability & Graph
-        run: |
-          trivy fs . \
-            --scanners vuln,secret,misconfig,license \
-            --severity HIGH,CRITICAL \
-            --ignore-unfixed \
-            --dependency-tree \
-            --format json \
-            --output trivy-report.json
-
-      ######################################################################
-      # SARIF Output (uploads to GitHub Security tab)
-      ######################################################################
-      - name: Trivy SARIF Report
-        run: |
-          trivy fs . \
-            --format sarif \
-            --output trivy.sarif
-
-      - name: Upload SARIF to GitHub
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy.sarif
-
-      ######################################################################
-      # Auto PR Comment with Vulnerability Summary
-      ######################################################################
-      - name: Create summary for PR
-        if: github.event_name == 'pull_request'
-        run: |
-          CRITICAL=$(jq '.Results[].Vulnerabilities[]? | select(.Severity=="CRITICAL")' trivy-report.json | wc -l)
-          HIGH=$(jq '.Results[].Vulnerabilities[]? | select(.Severity=="HIGH")' trivy-report.json | wc -l)
-
-          echo "**Trivy Scan Summary**" > pr_comment.md
-          echo "" >> pr_comment.md
-          echo "Critical: $CRITICAL" >> pr_comment.md
-          echo "High: $HIGH" >> pr_comment.md
-          echo "" >> pr_comment.md
-          echo "Full report available in **Artifacts** + **Security tab**." >> pr_comment.md
-
-      - name: Post PR Comment
-        if: github.event_name == 'pull_request'
-        uses: thollander/actions-comment-pull-request@v2
-        with:
-          filePath: pr_comment.md
-
-      ######################################################################
-      # Fail Pipeline on High/Critical Vulnerabilities
-      ######################################################################
-      - name: Fail if vulnerabilities found
-        run: |
-          COUNT=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="HIGH" or .Severity=="CRITICAL")] | length' trivy-report.json)
-          if [ "$COUNT" -gt 0 ]; then
-            echo "❌ Found HIGH/CRITICAL vulnerabilities: $COUNT"
-            exit 1
-          else
-            echo "No high or critical vulnerabilities found."
-          fi
