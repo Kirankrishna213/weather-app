@@ -1,0 +1,101 @@
+name: CI-CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-test-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+      - uses: actions/checkout@v4
+
+      # -------------------------
+      # Python Setup
+      # -------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # -------------------------
+      # Run Tests
+      # -------------------------
+      - name: Run Pytest
+        run: |
+          pytest --maxfail=5 --disable-warnings -v
+
+      # -------------------------
+      # Bandit Security Scan (Python SAST)
+      # -------------------------
+      - name: Bandit Scan
+        continue-on-error: true
+        run: |
+          bandit -r . -f json -o bandit-report.json || true
+          echo "Bandit scan completed (non-blocking)"
+
+      # -------------------------
+      # Install Trivy
+      # -------------------------
+      - name: Install Trivy
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y wget
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.52.2_Linux-64bit.deb
+          sudo dpkg -i trivy_0.52.2_Linux-64bit.deb
+
+      # -------------------------
+      # Trivy File System Scan (SCA + config scan)
+      # -------------------------
+      - name: Trivy FS Scan
+        continue-on-error: true
+        run: |
+          trivy fs --severity HIGH,CRITICAL --format json -o trivy-fs-report.json .
+          echo "Trivy filesystem scan completed (non-blocking)"
+
+      # -------------------------
+      # Docker Build (non-blocking)
+      # -------------------------
+      - name: Build Docker Image
+        run: |
+          docker build -t weather-app .
+
+      # -------------------------
+      # Trivy Docker Image Scan
+      # -------------------------
+      - name: Trivy Image Scan
+        continue-on-error: true
+        run: |
+          trivy image --severity HIGH,CRITICAL --format json -o trivy-image-report.json weather-app
+          echo "Trivy image scan completed (non-blocking)"
+
+      # -------------------------
+      # Upload Reports as Artifacts
+      # -------------------------
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            trivy-fs-report.json
+            trivy-image-report.json
+
+  deploy:
+    needs: build-test-scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deployment Placeholder
+        run: echo "Deploying weather app..."
