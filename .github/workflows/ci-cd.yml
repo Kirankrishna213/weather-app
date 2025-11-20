@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: Python CI/CD
 
 on:
   push:
@@ -9,9 +9,9 @@ on:
       - main
 
 jobs:
-  python-tests:
-    name: Python Tests & Safety Scan
+  test-and-scan:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +24,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest safety
+          pip install pytest safety sonar-scanner
 
       - name: Run Pytest
         run: pytest --maxfail=5 --disable-warnings -v
@@ -32,43 +32,13 @@ jobs:
       - name: OWASP Safety Scan
         run: safety scan --full-report
 
-  owasp-dependency-check:
-    name: OWASP Dependency Check (Maven/Gradle)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK
-        uses: actions/setup-java@v3
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-
-      - name: Run Maven OWASP Dependency Check
+      - name: SonarCloud Scan
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          if [ -f "pom.xml" ]; then
-            mvn org.owasp:dependency-check-maven:9.5.2:check
-          else
-            echo "No pom.xml found, skipping Maven dependency check."
-          fi
-
-      - name: Run Gradle OWASP Dependency Check
-        run: |
-          if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-            ./gradlew dependencyCheckAnalyze
-          else
-            echo "No build.gradle or build.gradle.kts found, skipping Gradle dependency check."
-          fi
-
-  sonarcloud:
-    name: SonarCloud Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up SonarCloud
-        uses: sonarsource/sonarcloud-github-action@master
-        with:
-          projectBaseDir: .
-          organization: ${{ secrets.SONAR_ORG }}
-          token: ${{ secrets.SONAR_TOKEN }}
+          sonar-scanner \
+            -Dsonar.projectKey=YOUR_PROJECT_KEY \
+            -Dsonar.organization=YOUR_ORG \
+            -Dsonar.sources=. \
+            -Dsonar.host.url=https://sonarcloud.io \
+            -Dsonar.login=$SONAR_TOKEN
