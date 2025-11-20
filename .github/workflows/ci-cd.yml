@@ -1,50 +1,68 @@
-name: Full CI Logs with Tests & Security
+name: CI - Security, Tests, SonarQube
 
 on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  build-test:
+  ci:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 2. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
-          cache: pip
+          python-version: 3.9
 
-      - name: Install dependencies
+      # 3. Install Python dependencies
+      - name: Install Python dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest black flake8 pip-audit safety
+          pip install pytest safety
 
-      # -----------------------------
-      # Code Formatting
-      # -----------------------------
-      - name: Run Black (shows full diff but does NOT fail)
-        run: black --diff .
+      # 4. Python Security Scan (OWASP Safety)
+      - name: OWASP Python Dependency Scan
+        run: safety check --full-report
 
-      - name: Run flake8 (shows logs but does NOT fail)
-        run: flake8 . || true
+      # 5. Run Python tests
+      - name: Run pytest
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          pytest -vv --maxfail=1 --tb=long
 
-      # -----------------------------
-      # Tests (pytest)
-      # -----------------------------
-      - name: Run pytest (full verbose output)
-        run: pytest -vv
+      # 6. Set up Java (for Maven/Gradle)
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: 17
 
-      # -----------------------------
-      # Security Scans
-      # -----------------------------
-      - name: Run pip-audit (show all CVEs)
-        run: pip-audit || true
+      # 7. Maven OWASP Dependency Check
+      - name: OWASP Dependency Check - Maven
+        if: exists('pom.xml')
+        run: mvn org.owasp:dependency-check-maven:check
 
-      - name: Run OWASP Safety (show all CVEs)
-        run: safety check || true
+      # 8. Gradle OWASP Dependency Check
+      - name: OWASP Dependency Check - Gradle
+        if: exists('build.gradle') || exists('build.gradle.kts')
+        run: ./gradlew dependencyCheckAnalyze
+
+      # 9. SonarQube Analysis
+      - name: SonarQube Scan
+        uses: sonarsource/sonarcloud-github-action@v2
+        with:
+          projectKey: your-project-key
+          organization: your-org
+          token: ${{ secrets.SONAR_TOKEN }}
+          # Optional: adjust branch if needed
+          # branchName: ${{ github.ref_name }}
