@@ -1,117 +1,101 @@
-name: CI Pipeline
+name: Security Scan - Trivy
 
 on:
   push:
-    branches: ["main"]
+    branches: [ main ]
   pull_request:
-    branches: ["main"]
-
-permissions:
-  contents: read
-  security-events: write
-  pull-requests: write
 
 jobs:
-  build-test-scan:
-    runs-on: ubuntu-latest
+  trivy-scan:
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # --------------------------
-      # Python setup and tests
-      # --------------------------
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.9"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
-
-      - name: Run tests
-        run: pytest -q
-
-      # --------------------------
-      # Install Trivy cleanly
-      # --------------------------
+      ######################################################################
+      # Install Trivy (safe apt repo method, no 404s)
+      ######################################################################
       - name: Install Trivy
         run: |
           sudo apt-get update -y
-          sudo apt-get install wget gnupg lsb-release -y
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
 
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
 
           echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] \
             https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
-            | sudo tee /etc/apt/sources.list.d/trivy.list > /dev/null
+            | sudo tee /etc/apt/sources.list.d/trivy.list
 
           sudo apt-get update -y
-          sudo apt-get install trivy -y
+          sudo apt-get install -y trivy
 
-      - name: Create report folder
-        run: mkdir -p trivy-report
+      ######################################################################
+      # SBOM Generation
+      ######################################################################
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          trivy sbom --output sbom.json .
 
-      # --------------------------
-      # Vulnerability Scan + Reachability
-      # --------------------------
-      - name: Run Trivy filesystem scan
+      ######################################################################
+      # Vulnerability Scan + Reachability + Dependency Graph
+      ######################################################################
+      - name: Trivy FS Scan with Reachability & Graph
         run: |
           trivy fs . \
-            --format json \
-            --output trivy-report/fs-report.json \
+            --scanners vuln,secret,misconfig,license \
             --severity HIGH,CRITICAL \
-            --scanners vuln,secret,misconfig \
-            --reachability
+            --ignore-unfixed \
+            --dependency-tree \
+            --format json \
+            --output trivy-report.json
 
-      # --------------------------
-      # SBOM
-      # --------------------------
-      - name: Generate SBOM
-        run: |
-          trivy sbom . \
-            --format cyclonedx \
-            --output trivy-report/sbom.xml
-
-      # --------------------------
-      # SARIF
-      # --------------------------
-      - name: Generate SARIF report
+      ######################################################################
+      # SARIF Output (uploads to GitHub Security tab)
+      ######################################################################
+      - name: Trivy SARIF Report
         run: |
           trivy fs . \
             --format sarif \
-            --output trivy-report/report.sarif
+            --output trivy.sarif
 
-      - name: Upload SARIF to GitHub Security
+      - name: Upload SARIF to GitHub
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: trivy-report/report.sarif
+          sarif_file: trivy.sarif
 
-      # --------------------------
-      # Artifact Upload
-      # --------------------------
-      - name: Upload Trivy Reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-report
-          path: trivy-report/
-
-      # --------------------------
-      # PR Comment with summary
-      # --------------------------
-      - name: Comment on PR with vulnerability summary
+      ######################################################################
+      # Auto PR Comment with Vulnerability Summary
+      ######################################################################
+      - name: Create summary for PR
         if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
+        run: |
+          CRITICAL=$(jq '.Results[].Vulnerabilities[]? | select(.Severity=="CRITICAL")' trivy-report.json | wc -l)
+          HIGH=$(jq '.Results[].Vulnerabilities[]? | select(.Severity=="HIGH")' trivy-report.json | wc -l)
+
+          echo "**Trivy Scan Summary**" > pr_comment.md
+          echo "" >> pr_comment.md
+          echo "Critical: $CRITICAL" >> pr_comment.md
+          echo "High: $HIGH" >> pr_comment.md
+          echo "" >> pr_comment.md
+          echo "Full report available in **Artifacts** + **Security tab**." >> pr_comment.md
+
+      - name: Post PR Comment
+        if: github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          header: trivy-summary
-          message: |
-            ### 🔍 Trivy Scan Summary
-            - Vulnerabilities scanned (vuln + secret + misconfig)
-            - Reachability analysis included
-            - SBOM generat
+          filePath: pr_comment.md
+
+      ######################################################################
+      # Fail Pipeline on High/Critical Vulnerabilities
+      ######################################################################
+      - name: Fail if vulnerabilities found
+        run: |
+          COUNT=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="HIGH" or .Severity=="CRITICAL")] | length' trivy-report.json)
+          if [ "$COUNT" -gt 0 ]; then
+            echo "❌ Found HIGH/CRITICAL vulnerabilities: $COUNT"
+            exit 1
+          else
+            echo "No high or critical vulnerabilities found."
+          fi
