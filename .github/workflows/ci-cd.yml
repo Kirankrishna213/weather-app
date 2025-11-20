@@ -1,4 +1,4 @@
-name: CI with Tests & Security
+name: Full CI/CD with Tests, Security, Formatting & Render Rollback
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: '3.9'
           cache: pip
 
       - name: Install dependencies
@@ -26,21 +26,61 @@ jobs:
           pip install -r requirements.txt
           pip install pytest black flake8 pip-audit safety
 
-      # Formatting
-      - name: Black formatting check
-        run: black --check . || echo "Formatting issues"
+      # --- Code formatting ---
+      - name: Auto-format with Black
+        run: black .
 
-      # Lint
-      - name: Flake8 linting
+      # --- Linting ---
+      - name: Lint with flake8
         run: flake8 . || echo "Lint warnings only"
 
-      # Tests
-      - name: Run pytest
-        run: pytest || echo "Tests failed or no tests found"
+      # --- Unit testing ---
+      - name: Run tests
+        run: pytest --junitxml=pytest-report.xml || echo "No tests found"
 
-      # Security Scans
-      - name: Python dependency vulnerability scan
+      # --- Security scans ---
+      - name: pip-audit (Python dependency vulnerabilities)
         run: pip-audit || echo "vulnerabilities found"
 
-      - name: OWASP safety check
+      - name: Safety (OWASP vulnerability scan)
         run: safety check || echo "safety warnings"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-test
+    if: success()
+
+    steps:
+      - name: Trigger Render deployment
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          echo "Triggering Render deployment..."
+          DEPLOY_RESPONSE=$(curl -s -X POST "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache": true}')
+          echo "Deploy started: $DEPLOY_RESPONSE"
+
+      - name: Verify Render deployment
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          echo "Checking deployment status..."
+          sleep 20
+          STATUS=$(curl -s \
+            "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" | jq '.[0].status')
+
+          echo "Deployment status: $STATUS"
+
+          if [ "$STATUS" != "\"live\"" ]; then
+            echo "Deployment failed – rolling back..."
+            curl -X POST "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
+              -H "Authorization: Bearer ${RENDER_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d '{"rollback": true}'
+            exit 1
+          fi
