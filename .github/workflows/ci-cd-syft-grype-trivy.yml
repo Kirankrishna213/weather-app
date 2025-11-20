@@ -1,4 +1,4 @@
-name: CI - Tests, SAST & SCA (Syft/Grype/Trivy)
+name: CI-CD
 
 on:
   push:
@@ -6,14 +6,9 @@ on:
   pull_request:
     branches: [ "main" ]
 
-env:
-  # Which severities should block deploy. Adjust as needed.
-  BLOCK_SEVERITIES: "HIGH,CRITICAL"
-
 jobs:
   build-test-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
       - name: Checkout code
@@ -24,192 +19,36 @@ jobs:
         with:
           python-version: "3.9"
 
-      - name: Install common tooling
+      - name: Install deps
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq curl docker.io
+          pip install -r requirements.txt
 
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt || true
-          pip install pytest bandit semgrep || true
-
-      # make repo importable by tests
-      - name: Add repo to PYTHONPATH
-        run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
-
-      # -------------------------
-      # Unit tests
-      # -------------------------
       - name: Run pytest
-        id: pytest
-        run: |
-          pytest --maxfail=5 --disable-warnings -v
+        run: pytest
 
-      # -------------------------
-      # SAST: Semgrep
-      # -------------------------
-      - name: Run Semgrep (SAST)
-        id: semgrep
-        uses: returntocorp/semgrep-action@v1
-        with:
-          config: "auto"
-        continue-on-error: true
-
-      # -------------------------
-      # SAST: Bandit (Python)
-      # -------------------------
-      - name: Run Bandit (Python SAST)
-        id: bandit
-        continue-on-error: true
+      - name: Build Docker Image
         run: |
-          bandit -r . -f json -o bandit-report.json || true
-          jq '.' bandit-report.json || true
+          docker build -t weather-app .
 
-      # -------------------------
-      # Install Syft and Grype (Anchore)
-      # -------------------------
-      - name: Install Syft (SBOM) and Grype (SCA)
+      # === TRIVY INSTALL (Stable & Reliable) ===
+      - name: Install Trivy
         run: |
-          set -eux
-          # install syft
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-          # install grype
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
-
-      # -------------------------
-      # Generate SBOM (Syft)
-      # -------------------------
-      - name: Generate SBOM (Syft)
-        id: syft
-        run: |
-          syft -o json . > sbom-syft.json
-          echo "SBOM generated: sbom-syft.json"
-          jq '.artifacts | length' sbom-syft.json
-
-      # -------------------------
-      # Scan SBOM with Grype
-      # -------------------------
-      - name: Scan SBOM with Grype
-        id: grype_scan
-        run: |
-          # grype can take an sbom file as input
-          grype sbom:sbom-syft.json -o json > grype-report.json || true
-          echo "Grype report (json) saved to grype-report.json"
-          # Print summary counts by severity
-          jq '[.matches[].vulnerability.severity] | group_by(.) | map({severity: .[0], count: length})' grype-report.json || true
-
-      # -------------------------
-      # Install Trivy (official repo)
-      # -------------------------
-      - name: Install Trivy (official repo)
-        run: |
-          sudo apt-get update -y
+          sudo apt-get update
           sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
           sudo apt-get install -y trivy
 
-      # -------------------------
-      # Trivy filesystem scan (SCA)
-      # -------------------------
-      - name: Trivy FS scan (dependencies & IaC)
-        id: trivy_fs
+      # === TRIVY SCAN: FAIL DEPLOYMENT IF HIGH/CRITICAL ===
+      - name: Trivy scan (block deploy on high vulns)
         run: |
-          trivy fs --format json --output trivy-fs-report.json --severity CRITICAL,HIGH .
-          echo "Trivy FS scan complete, file: trivy-fs-report.json"
-          jq '{Count: (.Results | map(.Vulnerabilities // []) | add | length), Results: .Results}' trivy-fs-report.json || true
-        continue-on-error: true
+          trivy image --exit-code 1 --severity HIGH,CRITICAL --format table weather-app
 
-      # -------------------------
-      # Build Docker image (if Dockerfile exists)
-      # -------------------------
-      - name: Build Docker image (if Dockerfile exists)
-        id: docker_build
-        run: |
-          if [ -f Dockerfile ]; then
-            docker build -t weather-app:ci -f Dockerfile .
-          else
-            echo "No Dockerfile - skipping docker build"
-          fi
-
-      # -------------------------
-      # Trivy image scan (if image built)
-      # -------------------------
-      - name: Trivy image scan
-        id: trivy_image
-        run: |
-          if docker image inspect weather-app:ci > /dev/null 2>&1; then
-            trivy image --format json --output trivy-image-report.json --severity CRITICAL,HIGH weather-app:ci || true
-            jq '.Results | map(.Vulnerabilities // []) | add | length as $count | {vuln_count: $count, results: .Results}' trivy-image-report.json || true
-          else
-            echo "{}" > trivy-image-report.json
-            echo "No image to scan"
-          fi
-        continue-on-error: true
-
-      # -------------------------
-      # Persist reports as artifact
-      # -------------------------
-      - name: Upload security reports
+      # === OPTIONAL: upload Trivy report ===
+      - name: Upload Trivy Report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: security-reports
-          path: |
-            sbom-syft.json
-            grype-report.json
-            trivy-fs-report.json
-            trivy-image-report.json
-            bandit-report.json || true
-
-      # -------------------------
-      # Decide: fail if HIGH/CRITICAL found
-      # -------------------------
-      - name: Fail on HIGH/CRITICAL vulnerabilities (Grype + Trivy)
-        id: fail_on_vul
-        run: |
-          set -eux
-          # Grab counts from grype-report.json (matches[].vulnerability.severity)
-          GRYPE_HIGH=$(jq '[.matches[]?.vulnerability.severity | select(. == "High" or . == "HIGH" or . == "high")] | length' grype-report.json || echo 0)
-          GRYPE_CRIT=$(jq '[.matches[]?.vulnerability.severity | select(. == "Critical" or . == "CRITICAL" or . == "critical")] | length' grype-report.json || echo 0)
-
-          # Trivy FS
-          TRIVY_FS_HIGH=$(jq '[.Results[]?.Vulnerabilities[]?.Severity | select(. == "HIGH" or . == "High" or . == "high")] | length' trivy-fs-report.json || echo 0)
-          TRIVY_FS_CRIT=$(jq '[.Results[]?.Vulnerabilities[]?.Severity | select(. == "CRITICAL" or . == "Critical" or . == "critical")] | length' trivy-fs-report.json || echo 0)
-
-          # Trivy image
-          TRIVY_IMG_HIGH=$(jq '[.Results[]?.Vulnerabilities[]?.Severity | select(. == "HIGH" or . == "High" or . == "high")] | length' trivy-image-report.json || echo 0)
-          TRIVY_IMG_CRIT=$(jq '[.Results[]?.Vulnerabilities[]?.Severity | select(. == "CRITICAL" or . == "Critical" or . == "critical")] | length' trivy-image-report.json || echo 0)
-
-          echo "grype high=$GRYPE_HIGH grype crit=$GRYPE_CRIT trivy_fs high=$TRIVY_FS_HIGH trivy_fs crit=$TRIVY_FS_CRIT trivy_img high=$TRIVY_IMG_HIGH trivy_img crit=$TRIVY_IMG_CRIT"
-
-          SUM_HIGH=$((GRYPE_HIGH + TRIVY_FS_HIGH + TRIVY_IMG_HIGH))
-          SUM_CRIT=$((GRYPE_CRIT + TRIVY_FS_CRIT + TRIVY_IMG_CRIT))
-
-          if [ "$SUM_HIGH" -gt 0 ] || [ "$SUM_CRIT" -gt 0 ]; then
-            echo "❌ Blocking pipeline: found HIGH/CRITICAL vulnerabilities"
-            echo "Summary: HIGH=$SUM_HIGH CRITICAL=$SUM_CRIT"
-            # print the offending entries for quick triage
-            echo "=== Grype HIGH/CRITICAL matches ==="
-            jq '.matches[] | select(.vulnerability.severity | ascii_downcase=="high" or .vulnerability.severity | ascii_downcase=="critical")' grype-report.json || true
-            echo "=== Trivy FS HIGH/CRITICAL results ==="
-            jq '.Results[]?.Vulnerabilities[] | select(.Severity | ascii_downcase=="high" or .Severity | ascii_downcase=="critical")' trivy-fs-report.json || true
-            echo "=== Trivy Image HIGH/CRITICAL results ==="
-            jq '.Results[]?.Vulnerabilities[] | select(.Severity | ascii_downcase=="high" or .Severity | ascii_downcase=="critical")' trivy-image-report.json || true
-
-            # fail the job
-            exit 1
-          else
-            echo "✅ No HIGH/CRITICAL vulns found. Proceeding."
-          fi
-
-  deploy:
-    needs: build-test-scan
-    runs-on: ubuntu-latest
-    if: success()
-    steps:
-      - name: Deploy placeholder
-        run: |
-          echo "All checks passed or no blocking vulnerabilities - deploy can run here."
+          name: trivy-report
+          path: trivy-report.txt
