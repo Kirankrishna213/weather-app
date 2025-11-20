@@ -13,8 +13,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # -------------------------
+      # Checkout
+      # -------------------------
       - name: Checkout code
-      - uses: actions/checkout@v4
+        uses: actions/checkout@v4
 
       # -------------------------
       # Python Setup
@@ -37,7 +40,7 @@ jobs:
           pytest --maxfail=5 --disable-warnings -v
 
       # -------------------------
-      # Bandit Security Scan (Python SAST)
+      # Bandit Security Scan (non-blocking)
       # -------------------------
       - name: Bandit Scan
         continue-on-error: true
@@ -56,7 +59,7 @@ jobs:
           sudo dpkg -i trivy_0.52.2_Linux-64bit.deb
 
       # -------------------------
-      # Trivy File System Scan (SCA + config scan)
+      # Trivy FS Scan (non-blocking)
       # -------------------------
       - name: Trivy FS Scan
         continue-on-error: true
@@ -65,14 +68,14 @@ jobs:
           echo "Trivy filesystem scan completed (non-blocking)"
 
       # -------------------------
-      # Docker Build (non-blocking)
+      # Docker Build
       # -------------------------
       - name: Build Docker Image
         run: |
           docker build -t weather-app .
 
       # -------------------------
-      # Trivy Docker Image Scan
+      # Trivy Docker Image Scan (non-blocking)
       # -------------------------
       - name: Trivy Image Scan
         continue-on-error: true
@@ -81,7 +84,7 @@ jobs:
           echo "Trivy image scan completed (non-blocking)"
 
       # -------------------------
-      # Upload Reports as Artifacts
+      # Upload Reports
       # -------------------------
       - name: Upload security reports
         uses: actions/upload-artifact@v4
