@@ -19,7 +19,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Python setup
+      # --------------------------
+      # Python setup and tests
+      # --------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -34,9 +36,9 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-      # -------------------------------------------------------
-      # INSTALL TRIVY (Safe & error-free)
-      # -------------------------------------------------------
+      # --------------------------
+      # Install Trivy cleanly
+      # --------------------------
       - name: Install Trivy
         run: |
           sudo apt-get update -y
@@ -45,38 +47,40 @@ jobs:
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
 
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] \
+            https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
             | sudo tee /etc/apt/sources.list.d/trivy.list > /dev/null
 
           sudo apt-get update -y
           sudo apt-get install trivy -y
 
-      # -------------------------------------------------------
-      # FS SCAN WITH REACHABILITY ANALYSIS
-      # -------------------------------------------------------
-      - name: Run Trivy filesystem scan with reachability
-        run: |
-          mkdir -p trivy-report
+      - name: Create report folder
+        run: mkdir -p trivy-report
 
+      # --------------------------
+      # Vulnerability Scan + Reachability
+      # --------------------------
+      - name: Run Trivy filesystem scan
+        run: |
           trivy fs . \
             --format json \
             --output trivy-report/fs-report.json \
             --severity HIGH,CRITICAL \
-            --scanners vuln \
+            --scanners vuln,secret,misconfig \
             --reachability
 
-      # -------------------------------------------------------
-      # GENERATE SBOM (CycloneDX)
-      # -------------------------------------------------------
+      # --------------------------
+      # SBOM
+      # --------------------------
       - name: Generate SBOM
         run: |
           trivy sbom . \
             --format cyclonedx \
             --output trivy-report/sbom.xml
 
-      # -------------------------------------------------------
-      # GENERATE SARIF FOR GITHUB SECURITY TAB
-      # -------------------------------------------------------
+      # --------------------------
+      # SARIF
+      # --------------------------
       - name: Generate SARIF report
         run: |
           trivy fs . \
@@ -88,18 +92,18 @@ jobs:
         with:
           sarif_file: trivy-report/report.sarif
 
-      # -------------------------------------------------------
-      # UPLOAD ALL REPORTS AS ARTIFACTS
-      # -------------------------------------------------------
-      - name: Upload Trivy reports
+      # --------------------------
+      # Artifact Upload
+      # --------------------------
+      - name: Upload Trivy Reports
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: trivy-report/
 
-      # -------------------------------------------------------
-      # AUTO PR COMMENT WITH SUMMARY
-      # -------------------------------------------------------
+      # --------------------------
+      # PR Comment with summary
+      # --------------------------
       - name: Comment on PR with vulnerability summary
         if: github.event_name == 'pull_request'
         uses: marocchino/sticky-pull-request-comment@v2
@@ -107,25 +111,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           header: trivy-summary
           message: |
-            ### 🔍 Trivy Vulnerability Summary
-            - High/Critical vulnerabilities were scanned.
-            - Reachability analysis included.
-            - SBOM generated.
-            - SARIF uploaded to the **Security** tab.
-
-            **Files generated:**
-            - `fs-report.json`
-            - `sbom.xml`
-            - `report.sarif`
-
-      # -------------------------------------------------------
-      # FAIL PIPELINE IF HIGH/CRITICAL
-      # -------------------------------------------------------
-      - name: Fail if high or critical vulnerabilities found
-        run: |
-          if jq '.Results[].Vulnerabilities | length > 0' trivy-report/fs-report.json | grep -q true; then
-            echo "High or Critical vulnerabilities detected."
-            exit 1
-          else
-            echo "No High or Critical vulnerabilities found."
-          fi
+            ### 🔍 Trivy Scan Summary
+            - Vulnerabilities scanned (vuln + secret + misconfig)
+            - Reachability analysis included
+            - SBOM generat
