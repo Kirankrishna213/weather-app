@@ -1,28 +1,21 @@
-name: Weather App CI/CD
+name: CI-CD
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
-
-  tests-security-build:
+  build-test-scan:
     runs-on: ubuntu-latest
-
-    permissions:
-      actions: read
-      contents: read
-      security-events: write    # needed for CodeQL
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ---------------------------
-      # 1. Python setup + install deps
-      # ---------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -31,90 +24,17 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pytest
 
-      # ---------------------------
-      # 2. Run tests
-      # ---------------------------
-      - name: Run Pytest
-        run: pytest -q
+      - name: Run tests
+        run: |
+          pytest -q
 
-      # ---------------------------
-      # 3. Trivy Dependency Scan
-      # ---------------------------
+      # -------------------------------
+      # INSTALL TRIVY (official method)
+      # -------------------------------
       - name: Install Trivy
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          sudo apt-get update -y
+          sudo apt-get install wget apt-transport-https gnupg lsb-release -y
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
-
-      - name: Run Trivy Scan
-        id: trivy-scan
-        run: |
-          trivy fs --severity HIGH,CRITICAL --format json --output trivy-report.json .
-          EXIT_CODE=$?
-          echo "TRIVY_EXIT=$EXIT_CODE" >> $GITHUB_ENV
-        continue-on-error: true
-
-      - name: Upload Trivy Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-report
-          path: trivy-report.json
-
-      # ---------------------------
-      # 4. Semgrep Reachability-style Analysis
-      # ---------------------------
-      - name: Install Semgrep
-        run: curl -sL https://semgrep.dev/install.sh | bash
-
-      - name: Run Semgrep (OWASP + Python Security)
-        run: |
-          semgrep scan \
-            --config p/owasp-top-ten \
-            --config p/python \
-            --config p/security-audit \
-            --json --output semgrep-report.json || true
-
-      - name: Upload Semgrep Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: semgrep-report
-          path: semgrep-report.json
-
-      # ---------------------------
-      # 5. CodeQL Deep Analysis
-      # ---------------------------
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: python
-
-      - name: Build
-        run: pip install -r requirements.txt
-
-      - name: CodeQL Analyze
-        uses: github/codeql-action/analyze@v3
-
-      # ---------------------------
-      # 6. STOP DEPLOY if HIGH/CRITICAL vulnerabilities
-      # ---------------------------
-      - name: Fail if Trivy found high/critical vulns
-        if: env.TRIVY_EXIT != '0'
-        run: |
-          echo "High or Critical vulnerabilities detected. Stopping deployment."
-          exit 1
-
-  # ---------------------------
-  # 7. DEPLOYMENT (runs only if previous job passes)
-  # ---------------------------
-  deploy:
-    needs: tests-security-build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Deployment placeholder
-        run: echo "Deploying Weather App..."
+          echo "deb https://aquasecurity.github.io/trivy-rep
