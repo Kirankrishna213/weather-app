@@ -1,13 +1,12 @@
-name: CI
+name: Full CI Logs with Tests & Security
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches:
+      - main
 
 jobs:
-  build-test-security:
+  build-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -17,29 +16,35 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: '3.9'
+          cache: pip
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
+          pip install pytest black flake8 pip-audit safety
 
-      - name: Run pytest
-        run: pytest --junitxml=pytest-report.xml || echo "No tests found"
+      # -----------------------------
+      # Code Formatting
+      # -----------------------------
+      - name: Run Black (shows full diff but does NOT fail)
+        run: black --diff .
 
-      # OWASP Dependency Scan Alternative (Free Tools)
-      - name: Run pip-audit
-        run: pip-audit || echo "vulnerabilities found"
+      - name: Run flake8 (shows logs but does NOT fail)
+        run: flake8 . || true
 
-      - name: Run safety (OWASP style vulnerability scan)
-        run: safety scan || echo "safety warnings"
+      # -----------------------------
+      # Tests (pytest)
+      # -----------------------------
+      - name: Run pytest (full verbose output)
+        run: pytest -vv
 
-      # Endor Labs Scan — only if you have API key
-      - name: Endor Labs Scan
-        if: env.ENDOR_API_TOKEN != ''
-        run: |
-          curl -sSL https://get.endorlabs.com/endorctl/install.sh | sh
-          ./endorctl scan --dir .
-        env:
-          ENDOR_API_TOKEN: ${{ secrets.ENDOR_API_TOKEN }}
+      # -----------------------------
+      # Security Scans
+      # -----------------------------
+      - name: Run pip-audit (show all CVEs)
+        run: pip-audit || true
+
+      - name: Run OWASP Safety (show all CVEs)
+        run: safety check || true
