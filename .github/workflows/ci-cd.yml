@@ -1,4 +1,4 @@
-name: CI - Security, Tests, SonarQube
+name: CI/CD Pipeline
 
 on:
   push:
@@ -9,66 +9,55 @@ on:
       - main
 
 jobs:
-  ci:
+  test-python:
+    name: Python Tests & Safety Scan
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: 3.9
 
-      # 3. Install Python dependencies
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest safety
 
-      # 4. Python Security Scan (OWASP Safety)
-      - name: OWASP Python Dependency Scan
-        run: safety check --full-report
-
-      # 5. Run pytest
-      - name: Run pytest
+      - name: Run Pytest
         run: |
-          export PYTHONPATH=$PYTHONPATH:$(pwd)
-          pytest -vv --maxfail=1 --tb=long
+          pytest --maxfail=5 --disable-warnings -v
 
-      # 6. Set up Java
-      - name: Set up Java
+      - name: OWASP Safety Scan
+        run: |
+          safety scan --full-report
+
+  owasp-dependency-check:
+    name: OWASP Dependency Check (Maven/Gradle)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
         uses: actions/setup-java@v3
         with:
-          distribution: temurin
-          java-version: 17
+          java-version: '11'
+          distribution: 'temurin'
 
-      # 7. Maven OWASP Dependency Check
-      - name: OWASP Dependency Check - Maven
-        run: |
-          if [ -f pom.xml ]; then
-            mvn org.owasp:dependency-check-maven:check
-          else
-            echo "No pom.xml, skipping Maven dependency check"
-          fi
+      - name: Run Maven OWASP Dependency Check
+        if: ${{ exists('pom.xml') }}
+        run: mvn org.owasp:dependency-check-maven:9.5.2:check
 
-      # 8. Gradle OWASP Dependency Check
-      - name: OWASP Dependency Check - Gradle
-        run: |
-          if [ -f build.gradle ] || [ -f build.gradle.kts ]; then
-            ./gradlew dependencyCheckAnalyze
-          else
-            echo "No Gradle build file, skipping Gradle dependency check"
-          fi
+      - name: Run Gradle OWASP Dependency Check
+        if: ${{ exists('build.gradle') || exists('build.gradle.kts') }}
+        run: ./gradlew dependencyCheckAnalyze
 
-      # 9. SonarQube Analysis
-      - name: SonarQube Scan
-        uses: sonarsource/sonarcloud-github-action@v2
-        with:
-          projectKey: your-project-key
-          organization: your-org
-          token: ${{ secrets.SONAR_TOKEN }}
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: C
