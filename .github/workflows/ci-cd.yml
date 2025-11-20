@@ -1,0 +1,91 @@
+name: CI-CD Pipeline
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build_and_scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit
+
+      # ---------------------------
+      # SECURITY SCAN - BANDIT
+      # ---------------------------
+      - name: Run Bandit security scan
+        run: |
+          bandit -r . -f json -o bandit-report.json
+          HIGH=$(jq '.results[] | select(.issue_severity=="HIGH")' bandit-report.json | wc -l)
+          if [ "$HIGH" -gt 0 ]; then
+            echo "High severity Bandit issues found!"
+            exit 1
+          fi
+          echo "Bandit security scan passed"
+
+      # ---------------------------
+      # DEPENDENCY CHECK
+      # ---------------------------
+      - name: OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: "weather-app"
+          path: "."
+          format: "JSON"
+          out: "reports"
+
+      - name: Fail if HIGH or CRITICAL vulnerabilities found
+        run: |
+          HIGH=$(jq '.dependencies[]?.vulnerabilities[]? | select(.severity=="HIGH")' reports/dependency-check-report.json | wc -l)
+          CRITICAL=$(jq '.dependencies[]?.vulnerabilities[]? | select(.severity=="CRITICAL")' reports/dependency-check-report.json | wc -l)
+          if [ "$HIGH" -gt 0 ] || [ "$CRITICAL" -gt 0 ]; then
+            echo "Major vulnerabilities detected!"
+            exit 1
+          fi
+          echo "Dependency check passed"
+
+      # ---------------------------
+      # UNIT TESTS
+      # ---------------------------
+      - name: Run pytest
+        run: |
+          pytest --disable-warnings --maxfail=1
+
+      # ---------------------------
+      # SONARCLOUD SCAN
+      # ---------------------------
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v2
+        with:
+          projectBaseDir: .
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ---------------------------
+      # DOCKER BUILD (only if all above passed)
+      # ---------------------------
+      - name: Build Docker image
+        run: docker build -t weather-app .
+
+      # ---------------------------
+      # DEPLOY STAGE
+      # ---------------------------
+      - name: Deploy (example placeholder)
+        if: success()
+        run: echo "Deploying weather app..."
