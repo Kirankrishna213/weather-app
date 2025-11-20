@@ -4,3 +4,4 @@ waitress==2.1.2
 pytz==2023.3
 tzlocal==5.0.1
 pytest==8.2.2
+Werkzeug<3.0
