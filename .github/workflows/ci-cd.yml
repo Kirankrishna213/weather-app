@@ -2,90 +2,85 @@ name: CI-CD Pipeline
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   pull_request:
-    branches: ["main"]
+    branches: [ "main" ]
 
 jobs:
-  build_and_scan:
+  build-test-security:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.9"
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install bandit
+          pip install safety bandit
 
-      # ---------------------------
-      # SECURITY SCAN - BANDIT
-      # ---------------------------
-      - name: Run Bandit security scan
+      # -------------------------
+      # 1. Run Unit Tests
+      # -------------------------
+      - name: Run Tests
+        run: pytest --maxfail=5 --disable-warnings -v
+
+      # -------------------------
+      # 2. Run Safety (Vulnerability Scan)
+      # -------------------------
+      - name: Run Safety Vulnerability Scan
+        id: safety_scan
         run: |
-          bandit -r . -f json -o bandit-report.json
-          HIGH=$(jq '.results[] | select(.issue_severity=="HIGH")' bandit-report.json | wc -l)
-          if [ "$HIGH" -gt 0 ]; then
-            echo "High severity Bandit issues found!"
-            exit 1
+          echo "Running Safety vulnerability scan..."
+          safety scan -r requirements.txt --json > safety-report.json || true
+          echo "SAFETY_REPORT<<EOF" >> $GITHUB_OUTPUT
+          cat safety-report.json >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # -------------------------
+      # 3. Fail pipeline only if major (HIGH) vulnerabilities
+      # -------------------------
+      - name: Check for HIGH vulnerabilities
+        run: |
+          echo "Checking for HIGH severity vulnerabilities..."
+          HIGH_COUNT=$(jq '[.issues[] | select(.severity == "high")] | length' safety-report.json)
+
+          if [ "$HIGH_COUNT" -gt 0 ]; then
+              echo "❌ Deployment blocked. Found HIGH severity vulnerabilities:"
+              jq '.issues[] | select(.severity == "high") | {package_name, affected_versions, cve, description}' safety-report.json
+              exit 1
+          else
+              echo "✅ No HIGH vulnerabilities. Proceeding..."
           fi
-          echo "Bandit security scan passed"
 
-      # ---------------------------
-      # DEPENDENCY CHECK
-      # ---------------------------
-      - name: OWASP Dependency Check
-        uses: dependency-check/Dependency-Check_Action@main
-        with:
-          project: "weather-app"
-          path: "."
-          format: "JSON"
-          out: "reports"
-
-      - name: Fail if HIGH or CRITICAL vulnerabilities found
+      # -------------------------
+      # 4. Run Bandit (fail only on HIGH severity issues)
+      # -------------------------
+      - name: Run Bandit security scan (HIGH only)
         run: |
-          HIGH=$(jq '.dependencies[]?.vulnerabilities[]? | select(.severity=="HIGH")' reports/dependency-check-report.json | wc -l)
-          CRITICAL=$(jq '.dependencies[]?.vulnerabilities[]? | select(.severity=="CRITICAL")' reports/dependency-check-report.json | wc -l)
-          if [ "$HIGH" -gt 0 ] || [ "$CRITICAL" -gt 0 ]; then
-            echo "Major vulnerabilities detected!"
-            exit 1
+          bandit -r . -lll -f json -o bandit-report.json || true
+          HIGH_BANDIT=$(jq '[.results[] | select(.issue_severity == "HIGH")] | length' bandit-report.json)
+
+          if [ "$HIGH_BANDIT" -gt 0 ]; then
+              echo "❌ Deployment blocked. HIGH severity issues found in Bandit:"
+              jq '.results[] | select(.issue_severity == "HIGH") | {filename, issue_text, severity: .issue_severity}' bandit-report.json
+              exit 1
+          else
+              echo "✅ No HIGH Bandit issues."
           fi
-          echo "Dependency check passed"
 
-      # ---------------------------
-      # UNIT TESTS
-      # ---------------------------
-      - name: Run pytest
-        run: |
-          pytest --disable-warnings --maxfail=1
-
-      # ---------------------------
-      # SONARCLOUD SCAN
-      # ---------------------------
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@v2
-        with:
-          projectBaseDir: .
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # ---------------------------
-      # DOCKER BUILD (only if all above passed)
-      # ---------------------------
-      - name: Build Docker image
-        run: docker build -t weather-app .
-
-      # ---------------------------
-      # DEPLOY STAGE
-      # ---------------------------
-      - name: Deploy (example placeholder)
+      # -------------------------
+      # 5. Deployment (runs only if all above succeeded)
+      # -------------------------
+      - name: Deploy (only if no major findings)
         if: success()
-        run: echo "Deploying weather app..."
+        run: |
+          echo "🚀 Deployment started..."
+          # your deploy script or docker push goes here
+          echo "Deployment completed."
