@@ -14,12 +14,12 @@ jobs:
         uses: actions/checkout@v4
 
       ######################################################################
-      # Install Trivy safely (no 404)
+      # Correct Trivy installation (NO .deb download)
       ######################################################################
       - name: Install Trivy
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          sudo apt-get install -y wget gnupg lsb-release apt-transport-https
 
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
@@ -32,4 +32,50 @@ jobs:
           sudo apt-get install -y trivy
 
       ######################################################################
-      # SBOM Generation
+      # SBOM Generation (CycloneDX)
+      ######################################################################
+      - name: Generate SBOM
+        run: |
+          trivy fs . \
+            --format cyclonedx \
+            --output sbom.json
+
+      ######################################################################
+      # Vulnerability Scan (with reachability via dependency tree)
+      ######################################################################
+      - name: Trivy FS Scan
+        run: |
+          trivy fs . \
+            --scanners vuln,secret,misconfig,license \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --dependency-tree \
+            --format json \
+            --output trivy-report.json
+
+      ######################################################################
+      # SARIF for GitHub Security Tab
+      ######################################################################
+      - name: Trivy SARIF Report
+        run: |
+          trivy fs . \
+            --format sarif \
+            --output trivy.sarif
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+
+      ######################################################################
+      # Auto PR comment
+      ######################################################################
+      - name: Create PR Comment
+        if: github.event_name == 'pull_request'
+        run: |
+          CRITICAL=$(jq '.Results[].Vulnerabilities[]? | select(.Severity=="CRITICAL")' trivy-report.json | wc -l)
+          HIGH=$(jq '.Results[].Vulnerabilities[]? | select(.Severity=="HIGH")' trivy-report.json | wc -l)
+
+          echo "**Trivy Scan Summary**" > pr_comment.md
+          echo "" >> pr_comment.md
+          ech
